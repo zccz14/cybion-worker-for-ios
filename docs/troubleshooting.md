@@ -22,16 +22,17 @@ keeps the process running.
 
 ## `shell self-check failed` in worker.log
 
-The bundled shell could not start. Check, in order:
+At startup the worker runs `echo cybion-worker-check` through the in-process
+command engine. A failure here means the engine is broken - this should not
+happen in a released build. Rebuild and reinstall the app; if it persists,
+the log line contains the engine's own error message, which is the report.
 
-1. `CybionWorker.app/bin/mksh-sh` exists and is executable. On the simulator
-   `simctl install` strips the executable bit - `ios/run-sim.sh` fixes it;
-   reinstall with `chmod +x` for manual runs.
-2. The binaries carry a signature (ad-hoc on the simulator, your development
-   identity on the device). Rebuilding the app restores both.
+## `bash` rejects a command
 
-The rest of the Worker still starts when the shell check fails (theory: you
-see the pairing code); only `bash` and `diagnostics` will fail until fixed.
+The engine implements a documented subset of `sh`; unsupported syntax and
+commands fail with an explicit error naming what was rejected (loops,
+globbing, heredocs, arithmetic, ...). Check [commands.md](commands.md) for
+what is supported.
 
 ## Pairing problems
 

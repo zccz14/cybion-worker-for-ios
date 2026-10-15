@@ -9,10 +9,10 @@ listening sockets on the phone.
 | Layer | Language | Responsibility |
 | --- | --- | --- |
 | Protocol core | Rust | Pairing, SSE session, delivery receipts, dedup, retries, heartbeats, resources, tool dispatch |
-| Platform bridge | Rust -> Swift (C ABI) | Opening URLs; the shell/userland paths from the app bundle |
+| Command engine | Rust | The `bash` tool: a POSIX-style interpreter and native commands, all in-process |
+| Platform bridge | Rust -> Swift (C ABI) | Opening URLs (the only thing that needs UIKit) |
 | iOS shell | Swift (SwiftUI) | Single screen, background keep-alive, pairing links, status polling |
-| Bundled userland | C | `mksh` as `bin/mksh-sh` and `bin/busybox`; re-signed with the app |
-| Build | XcodeGen + cargo | One app containing the Rust `staticlib` and the userland |
+| Build | XcodeGen + cargo | One app containing the Rust `staticlib` |
 
 ## Wire protocol (as implemented)
 
@@ -27,14 +27,21 @@ listening sockets on the phone.
 
 ## Tool coverage
 
-`bash` spawns the bundled `mksh` with `-c` in the app container:
+`bash` runs an in-process command engine (`rust/src/shell/`, documented in
+[commands.md](commands.md)): each call starts a fresh shell with `HOME` and
+the working directory set to `Documents/CybionWorker` (shared with the Files
+app), runs the parsed list, and returns `{exit_code, stdout, stderr}` with
+output capped at 2 MiB.
 
-- `PATH` = `<container>/bin` then `<bundle>/bin`; at startup the app
-  materializes one symlink per busybox applet plus `sh`, so plain commands
-  (`ls`, `grep`, `awk`, ...) resolve like they do on Android from `/system/bin`.
-- `HOME` and the working directory are `Documents/CybionWorker`, which is
-  shared with the Files app.
-- Timeout and cancellation kill the whole process group, same as Android.
+- Pipeline stages run concurrently and exchange bounded chunks; a consumer
+  that exits early stops the producer through a broken-pipe error, and an
+  unbounded producer stays bounded. Pipeline stages and `$(...)` run on
+  cloned state, so `cd` inside them never leaks out.
+- The timeout and cancellation drop the whole engine future: nothing keeps
+  running after a `cancel` event or a timeout, and both end the call with an
+  explicit tool error, matching the desktop Worker's messages.
+- Unsupported grammar or commands fail with explicit errors instead of
+  guessing; see `docs/commands.md` for the exact subset.
 
 `computer_use` supports `open` and answers every other action with an explicit
 "not supported on iOS Workers" error. The desktop action names stay the same;
@@ -42,12 +49,12 @@ iOS simply has no accessibility-style API for other apps.
 
 ## Decisions
 
-- **Bundled shell and userland.** iOS gives sandboxed apps no system shell and
-  the kernel refuses to execute binaries outside the app bundle, so the shell
-  (`mksh`, permissively licensed) and utilities (`busybox`) ship inside the
-  app and are re-signed with the app's identity. The applet symlink farm is
-  materialized from `busybox --list` at startup so it always matches the
-  binary.
+- **In-process command engine instead of a bundled shell.** iOS refuses to
+  `exec` any binary from a sandboxed app - `posix_spawn` fails with `EPERM`
+  even for a binary inside the app bundle - so a packaged shell could never
+  run on a device. Commands therefore execute inside the app process, the
+  same approach a-Shell uses. (The simulator *can* spawn, but running a
+  different shell there would only hide device bugs, so both use the engine.)
 - **Silent-audio keep-alive.** iOS suspends ordinary apps seconds after
   backgrounding. While the switch is on the app holds a `playback` audio
   session playing a silent buffer - the standard mechanism for user-enabled

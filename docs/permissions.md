@@ -30,12 +30,8 @@ bring the worker back. It reconnects automatically otherwise.
   `unsupported / no_accessibility_api`.)
 - **Browser control**: no browser automation hooks; reported as
   `missing_dependency / no_browser`, same shape as Android.
-- **A system shell**: the app bundles `mksh` + `busybox` and runs them inside
-  the app sandbox. There is no `sudo`, no other apps' data, no system paths.
-
-## Simulator specifics
-
-`xcrun simctl install` strips the executable bit of nested binaries, so
-`ios/run-sim.sh` re-applies `chmod +x` after installing. Spawned binaries must
-be signed (ad-hoc is fine on the simulator); the build signs them with the
-app's identity automatically.
+- **Spawning processes**: a sandboxed app cannot `exec` anything - not even a
+  binary shipped inside its own bundle (`posix_spawn` fails with `EPERM`).
+  There is therefore no system shell: `bash` is an in-process command engine
+  (see [commands.md](commands.md)), and there is no `sudo`, no other apps'
+  data, no system paths.

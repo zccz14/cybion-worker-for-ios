@@ -5,9 +5,11 @@ Turn an iPhone into a [Cybion](https://cybion.ntnl.io) Worker.
 The app keeps an outbound-only SSE connection to the Cybion Controller and
 executes tool calls on the device:
 
-- `bash` — commands through a bundled MirBSD Korn shell (`mksh`, the same
-  shell family Android exposes as `/system/bin/sh`) plus a bundled
-  [busybox](third_party/README.md) userland, all inside the app sandbox.
+- `bash` — an **in-process command engine**: a small POSIX-style interpreter
+  plus native commands that run inside the app process. iOS refuses to `exec`
+  any binary from a sandboxed app (even one shipped inside the bundle), so
+  nothing is spawned; the supported grammar and commands are documented in
+  [docs/commands.md](docs/commands.md).
 - `computer_use` — `open` launches URLs through the system; iOS gives apps no
   way to drive other apps, so taps, screenshots and UI trees are rejected with
   an explicit error.
@@ -47,8 +49,8 @@ xcrun devicectl device install app --device <UDID> \
     ~/Library/Developer/Xcode/DerivedData/CybionWorker-*/Build/Products/Release-iphoneos/CybionWorker.app
 ```
 
-For a fast development loop the iOS Simulator is supported (the toolchain
-ships simulator builds of the userland):
+For a fast development loop the iOS Simulator is supported and runs the same
+in-process engine as the device:
 
 ```sh
 sh ios/run-sim.sh
@@ -78,6 +80,9 @@ around what the Controller asks for.
 
 ## Limitations
 
+- `bash` implements a documented subset of `sh`: pipelines, redirections,
+  `&&`/`||`, variables and `$(...)`, but no loops, globbing, heredocs or
+  background jobs. See [docs/commands.md](docs/commands.md).
 - iOS does not let apps control other apps: `computer_use` offers `open` only.
 - The background keep-alive uses an audio session; iOS may still stop the
   process occasionally. Open the app to bring the worker back.
@@ -88,11 +93,7 @@ around what the Controller asks for.
 ## Development
 
 Toolchain: Rust (pinned in `rust/rust-toolchain.toml`), Xcode, `xcodegen`.
-The bundled shell and userland are prebuilt and committed; rebuild them with:
-
-```sh
-sh third_party/build-toolchain.sh
-```
+The command engine and its tests live in `rust/src/shell/`.
 
 Checks (`pr-check` runs the same):
 
@@ -103,6 +104,7 @@ cd rust && cargo fmt --all -- --check && cargo clippy --all-targets -- -D warnin
 ## Documentation
 
 - [docs/design.md](docs/design.md) — architecture and decisions.
+- [docs/commands.md](docs/commands.md) — what the `bash` engine accepts.
 - [docs/protocol.md](docs/protocol.md) — the wire protocol as implemented.
 - [docs/permissions.md](docs/permissions.md) — grants and device notes.
 - [docs/troubleshooting.md](docs/troubleshooting.md) — failure modes and fixes.
@@ -113,4 +115,4 @@ and [zccz14/cybion-worker-for-android](https://github.com/zccz14/cybion-worker-f
 
 ## License
 
-MIT. Release builds embed GPLv2 `busybox`; see [third_party/README.md](third_party/README.md).
+MIT.
