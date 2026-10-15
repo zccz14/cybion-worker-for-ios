@@ -639,6 +639,7 @@ mod tests {
         let lines: Vec<&str> = result.stdout.lines().collect();
         assert_eq!(lines.len(), 2);
         assert_eq!(lines[0].len(), 4);
-        assert_eq!(lines[1], "Darwin");
+        // Darwin on the iOS target and the dev Macs; Linux on CI.
+        assert!(matches!(lines[1], "Darwin" | "Linux"));
     }
 }
