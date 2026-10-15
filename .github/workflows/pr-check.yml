@@ -1,0 +1,57 @@
+name: pr-check
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+
+      - name: Install pinned Rust toolchain
+        working-directory: rust
+        run: rustup show
+
+      - name: Rust format
+        working-directory: rust
+        run: cargo fmt --all -- --check
+
+      - name: Rust clippy
+        working-directory: rust
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Rust tests
+        working-directory: rust
+        run: cargo test
+
+  ios:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      - name: Generate the Xcode project
+        run: cd ios && xcodegen generate
+
+      - name: Build the app (device, unsigned)
+        run: |
+          cd ios
+          xcodebuild -project CybionWorker.xcodeproj -scheme CybionWorker \
+            -configuration Debug -destination 'generic/platform=iOS' \
+            CODE_SIGNING_ALLOWED=NO build
