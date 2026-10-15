@@ -1,0 +1,26 @@
+/* Cybion Worker (iOS) */
+"app_title" = "Cybion Worker";
+"enable_worker" = "启用 Worker";
+"enable_footer" = "启用后，此手机将接受来自你的 Cybion 账号的任务：在应用沙盒内执行 shell 命令、打开链接。关闭开关即完全停止。";
+"section_status" = "状态";
+"status_starting" = "启动中…";
+"status_pairing" = "等待配对确认";
+"status_connecting" = "正在连接 Cybion…";
+"status_online" = "在线";
+"status_reconnecting" = "重新连接中（第 %d 次）…";
+"status_failed" = "失败：%@";
+"status_stopped" = "已停止";
+"status_worker_id" = "Worker：%@";
+"status_hostname" = "设备：%@";
+"section_pairing" = "配对";
+"open_pairing" = "打开配对页面";
+"pairing_hint" = "请在 Cybion 控制台的「Workers → 连接设备」中确认此配对码。只批准本手机屏幕上显示的配对码。";
+"retry" = "重试";
+"reset_pairing" = "重置配对";
+"reset_hint" = "删除已保存的凭证与未完成的配对。换账号配对前请先重置。";
+"section_limits" = "iOS 限制";
+"keep_alive" = "后台保活";
+"keep_alive_on" = "开启（音频会话）";
+"keep_alive_off" = "关闭";
+"limits_footer" = "iOS 不允许应用控制其他应用，因此点击、截屏、浏览器控制不可用；bash 仅在应用自身沙盒内运行。若连接意外中断，重新打开本应用即可恢复。";
+"footer_version" = "版本 %@ · cybion-worker-for-ios";

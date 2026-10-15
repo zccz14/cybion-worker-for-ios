@@ -1,0 +1,26 @@
+/* Cybion Worker (iOS) */
+"app_title" = "Cybion Worker";
+"enable_worker" = "Enable Worker";
+"enable_footer" = "While enabled, this phone accepts tasks from your Cybion account: shell commands inside the app sandbox and opening links. Turn the switch off to stop everything.";
+"section_status" = "Status";
+"status_starting" = "Starting…";
+"status_pairing" = "Waiting for pairing approval";
+"status_connecting" = "Connecting to Cybion…";
+"status_online" = "Online";
+"status_reconnecting" = "Reconnecting (attempt %d)…";
+"status_failed" = "Failed: %@";
+"status_stopped" = "Stopped";
+"status_worker_id" = "Worker: %@";
+"status_hostname" = "Device: %@";
+"section_pairing" = "Pairing";
+"open_pairing" = "Open pairing page";
+"pairing_hint" = "Approve this code in the Cybion console (Workers → Connect a device). Only approve the code shown on this phone.";
+"retry" = "Retry";
+"reset_pairing" = "Reset pairing";
+"reset_hint" = "Deletes the stored credential and pending pairing. Use it before pairing this phone with another account.";
+"section_limits" = "iOS limits";
+"keep_alive" = "Background keep-alive";
+"keep_alive_on" = "on (audio session)";
+"keep_alive_off" = "off";
+"limits_footer" = "iOS does not let apps control other apps, so taps, screenshots and browser control are unavailable; bash runs inside the app's own sandbox. If the connection ever stops, open the app to bring the worker back.";
+"footer_version" = "Version %@ · cybion-worker-for-ios";
