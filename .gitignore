@@ -5,3 +5,4 @@ ios/CybionWorker.xcodeproj/
 ios/run-sim.log
 *.xcuserstate
 xcuserdata/
+dist/

@@ -49,6 +49,10 @@ xcrun devicectl device install app --device <UDID> \
     ~/Library/Developer/Xcode/DerivedData/CybionWorker-*/Build/Products/Release-iphoneos/CybionWorker.app
 ```
 
+Prebuilt **unsigned** IPAs are attached to
+[releases](https://github.com/zccz14/cybion-worker-for-ios/releases); re-sign
+one with your own certificate (Sideloadly, AltStore or Xcode) to install it.
+
 For a fast development loop the iOS Simulator is supported and runs the same
 in-process engine as the device:
 

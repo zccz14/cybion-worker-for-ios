@@ -1,0 +1,53 @@
+name: release
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      - name: Generate the Xcode project
+        run: cd ios && xcodegen generate
+
+      - name: Build the app (device, unsigned)
+        run: |
+          cd ios
+          xcodebuild -project CybionWorker.xcodeproj -scheme CybionWorker \
+            -configuration Release -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/dd" \
+            CODE_SIGNING_ALLOWED=NO build
+
+      - name: Package the unsigned IPA
+        run: |
+          set -eu
+          APP="$RUNNER_TEMP/dd/Build/Products/Release-iphoneos/CybionWorker.app"
+          mkdir -p dist/Payload
+          cp -R "$APP" dist/Payload/
+          cd dist
+          zip -qry cybion-worker-ios-aarch64.ipa Payload
+          rm -rf Payload
+          shasum -a 256 cybion-worker-ios-aarch64.ipa > cybion-worker-ios-aarch64.ipa.sha256
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          body: |
+            Unsigned IPA - re-sign it with your own certificate (Sideloadly, AltStore or Xcode) before installing it on a device.
+          generate_release_notes: true
+          files: |
+            dist/cybion-worker-ios-aarch64.ipa
+            dist/cybion-worker-ios-aarch64.ipa.sha256
