@@ -26,6 +26,9 @@ pub struct DeviceInfo {
 }
 
 static DEVICE: OnceLock<DeviceInfo> = OnceLock::new();
+/// Working directory and `HOME` for `bash` calls: the app container folder
+/// that also holds `worker.toml` and `worker.log`.
+static SHELL_HOME: OnceLock<PathBuf> = OnceLock::new();
 static ENGINE: Mutex<Option<Engine>> = Mutex::new(None);
 
 struct Engine {
@@ -41,11 +44,15 @@ pub fn version() -> String {
         .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_owned())
 }
 
-fn hostname() -> String {
+pub(crate) fn hostname() -> String {
     DEVICE
         .get()
         .map(|device| device.hostname.clone())
         .unwrap_or_default()
+}
+
+pub(crate) fn shell_home() -> Option<PathBuf> {
+    SHELL_HOME.get().cloned()
 }
 
 pub fn snapshot() -> Snapshot {
@@ -70,6 +77,7 @@ pub fn start(config_dir: PathBuf, device: DeviceInfo) -> Result<()> {
         return Ok(());
     }
     let _ = DEVICE.set(device.clone());
+    let _ = SHELL_HOME.set(config_dir.clone());
     let state: SharedState = Arc::new(Mutex::new(Snapshot::starting(
         device.version.clone(),
         device.hostname.clone(),
@@ -256,8 +264,8 @@ async fn run_worker(
     Ok(())
 }
 
-/// The bundled shell is what makes `bash` possible; validate it once per
-/// engine start so worker.log explains a broken bundle immediately.
+/// The in-process engine is what makes `bash` possible; validate it once per
+/// engine start so worker.log explains a broken build immediately.
 async fn self_check() {
     let (_cancel_sender, cancel) = watch::channel(false);
     let outcome = tokio::time::timeout(

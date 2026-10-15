@@ -13,6 +13,7 @@ mod pairing;
 mod platform;
 mod protocol;
 mod resources;
+mod shell;
 mod state;
 mod tools;
 mod upgrade;

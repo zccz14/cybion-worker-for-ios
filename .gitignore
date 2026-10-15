@@ -3,7 +3,5 @@ rust/target/
 ios/built/
 ios/CybionWorker.xcodeproj/
 ios/run-sim.log
-third_party/mksh/
-third_party/busybox/
 *.xcuserstate
 xcuserdata/

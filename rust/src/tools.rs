@@ -8,7 +8,7 @@ use crate::bash;
 use crate::computer;
 use crate::protocol::ToolCall;
 
-pub const MAX_TOOL_OUTPUT_BYTES: usize = 2 * 1024 * 1024;
+pub const MAX_TOOL_OUTPUT_BYTES: usize = crate::shell::MAX_CAPTURE_BYTES;
 
 pub async fn execute_call(call: &ToolCall, cancel: watch::Receiver<bool>) -> Result<Value> {
     match call.name.as_str() {

@@ -4,16 +4,13 @@ import UIKit
 /// Thin Swift wrapper around the Rust worker core (rust/src/entry.rs).
 struct WorkerCore {
     /// Everything the worker persists lives here: worker.toml, the pending
-    /// pairing and worker.log. Documents/ is shared with the Files app.
+    /// pairing and worker.log. Documents/ is also the working directory of
+    /// `bash` calls (the in-process engine) and is shared with the Files app.
     let configDirectory: URL
-    let shellPath: String
-    let busyboxPath: String
 
-    init(fileManager: FileManager = .default, bundle: Bundle = .main) {
+    init(fileManager: FileManager = .default) {
         configDirectory = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("CybionWorker", isDirectory: true)
-        shellPath = bundle.bundlePath + "/bin/mksh-sh"
-        busyboxPath = bundle.bundlePath + "/bin/busybox"
     }
 
     var appVersion: String {
@@ -31,7 +28,7 @@ struct WorkerCore {
               let json = String(data: data, encoding: .utf8) else {
             return false
         }
-        return cybion_worker_start(configDirectory.path, json, shellPath, busyboxPath)
+        return cybion_worker_start(configDirectory.path, json)
     }
 
     func stop() {

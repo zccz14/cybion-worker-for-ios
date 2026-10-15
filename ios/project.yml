@@ -43,24 +43,3 @@ targets:
           cargo build --target "$TRIPLE" --release
           mkdir -p "$SRCROOT/built"
           cp "$SRCROOT/../rust/target/$TRIPLE/release/libcybion_worker_ios.a" "$SRCROOT/built/"
-    postBuildScripts:
-      - name: Bundle and sign the userland
-        basedOnDependencyAnalysis: false
-        script: |
-          set -e
-          case "$PLATFORM_NAME" in
-            iphoneos) USERLAND="$SRCROOT/../third_party/bin" ;;
-            iphonesimulator) USERLAND="$SRCROOT/../third_party/bin/sim" ;;
-            *) echo "error: unsupported platform $PLATFORM_NAME"; exit 1 ;;
-          esac
-          BIN="$CODESIGNING_FOLDER_PATH/bin"
-          mkdir -p "$BIN"
-          cp "$USERLAND/mksh-sh" "$BIN/mksh-sh"
-          cp "$USERLAND/busybox" "$BIN/busybox"
-          chmod +x "$BIN/mksh-sh" "$BIN/busybox"
-          # Nested executables must carry a signature before the app's seal is
-          # computed; CI builds without an identity skip this step.
-          if [ -n "${EXPANDED_CODE_SIGN_IDENTITY:-}" ]; then
-            codesign --force --sign "$EXPANDED_CODE_SIGN_IDENTITY" --timestamp=none "$BIN/mksh-sh"
-            codesign --force --sign "$EXPANDED_CODE_SIGN_IDENTITY" --timestamp=none "$BIN/busybox"
-          fi

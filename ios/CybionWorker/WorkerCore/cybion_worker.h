@@ -20,13 +20,12 @@ typedef struct {
 void cybion_worker_register_platform(const CybionPlatform *bridge);
 
 /// Starts the worker engine. `config_dir` is the writable container folder
-/// that stores worker.toml, the pending pairing and worker.log; `shell_path`
-/// and `busybox_path` point into the app bundle. False means the native side
-/// rejected the start (details land in worker.log).
+/// that stores worker.toml, the pending pairing and worker.log; it is also
+/// the working directory of `bash` calls, which run in-process (iOS cannot
+/// exec anything). False means the native side rejected the start (details
+/// land in worker.log).
 bool cybion_worker_start(const char *config_dir,
-                         const char *device_info_json,
-                         const char *shell_path,
-                         const char *busybox_path);
+                         const char *device_info_json);
 
 /// Requests shutdown and waits briefly for the engine thread to exit.
 void cybion_worker_stop(void);

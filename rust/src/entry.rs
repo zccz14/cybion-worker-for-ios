@@ -44,23 +44,16 @@ pub extern "C" fn cybion_worker_register_platform(bridge: *const CybionPlatform)
 pub extern "C" fn cybion_worker_start(
     config_dir: *const c_char,
     device_info_json: *const c_char,
-    shell_path: *const c_char,
-    busybox_path: *const c_char,
 ) -> bool {
     let result = catch_unwind(AssertUnwindSafe(|| -> anyhow::Result<()> {
         let config_dir =
             string_of(config_dir).ok_or_else(|| anyhow::anyhow!("config dir is missing"))?;
         let device_json =
             string_of(device_info_json).ok_or_else(|| anyhow::anyhow!("device info is missing"))?;
-        let shell_path =
-            string_of(shell_path).ok_or_else(|| anyhow::anyhow!("shell path is missing"))?;
-        let busybox_path =
-            string_of(busybox_path).ok_or_else(|| anyhow::anyhow!("busybox path is missing"))?;
         let device: DeviceInfo = serde_json::from_str(&device_json)?;
         let config_dir = PathBuf::from(config_dir);
         std::fs::create_dir_all(&config_dir)?;
         crate::logging::install(&config_dir);
-        platform::init_shell(&shell_path, &busybox_path, &config_dir)?;
         engine::start(config_dir, device)
     }));
     match result {
