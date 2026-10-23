@@ -13,8 +13,6 @@ use crate::config::{self, WorkerConfig};
 use crate::engine::{DeviceInfo, shutdown_requested};
 use crate::state::{self, Phase, SharedState, now_secs};
 
-pub const CONTROLLER: &str = "https://cybion.ntnl.io";
-
 #[derive(Serialize, Deserialize)]
 struct Pending {
     id: String,
@@ -52,20 +50,58 @@ pub async fn pair(
     state: &SharedState,
     shutdown: watch::Receiver<bool>,
 ) -> Result<WorkerConfig> {
+    // Pair through whichever entry this phone can actually reach; the chosen
+    // entry and the full list are both written to the config.
+    let entries = crate::candidates::default_candidates()?;
+    let mut last_error = None;
+    for entry in &entries {
+        match pair_with(dir, device, state, shutdown.clone(), entry.base(), &entries).await {
+            Ok(config) => return Ok(config),
+            // Only an unreachable entry moves on: an entry that answers and
+            // refuses is the real answer and must not be papered over.
+            Err(error) if unreachable(&error) => {
+                log::warn!(
+                    target: "cybion_worker",
+                    "could not reach {}: {error}; trying the next entry",
+                    entry.base()
+                );
+                last_error = Some(error);
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Err(last_error.unwrap_or_else(|| anyhow::anyhow!("no controller entry could be reached")))
+}
+
+/// A network-level failure, as opposed to an answer we should believe.
+fn unreachable(error: &anyhow::Error) -> bool {
+    error
+        .downcast_ref::<reqwest::Error>()
+        .is_some_and(|error| error.is_connect() || error.is_timeout() || error.is_request())
+}
+
+async fn pair_with(
+    dir: &Path,
+    device: &DeviceInfo,
+    state: &SharedState,
+    shutdown: watch::Receiver<bool>,
+    controller: &str,
+    entries: &[crate::candidates::Candidate],
+) -> Result<WorkerConfig> {
     let client = Client::builder()
         .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(15))
         .build()?;
     let pending_path = config::pairing_path(dir);
-    let pending = match load_pending(&client, &pending_path).await? {
+    let pending = match load_pending(&client, &pending_path, controller).await? {
         Some(pending) => pending,
-        None => start_pairing(&client, &pending_path, device).await?,
+        None => start_pairing(&client, &pending_path, device, controller).await?,
     };
     state::set_phase(
         state,
         Phase::Pairing {
             user_code: pending.user_code.clone(),
-            url: format!("{CONTROLLER}/#/workers?code={}", pending.user_code),
+            url: format!("{controller}/#/workers?code={}", pending.user_code),
             expires_at: pending.expires_at,
         },
     );
@@ -78,7 +114,7 @@ pub async fn pair(
             _ = shutdown_requested(shutdown.clone()) => bail!("stopped while pairing"),
         }
         let response = client
-            .get(format!("{CONTROLLER}/worker/v1/pairings/{}", pending.id))
+            .get(format!("{controller}/worker/v1/pairings/{}", pending.id))
             .bearer_auth(&pending.device_secret)
             .send()
             .await;
@@ -105,7 +141,12 @@ pub async fn pair(
             }
             "approved" => {
                 let config = WorkerConfig {
-                    controller_url: CONTROLLER.to_owned(),
+                    controller_url: controller.to_owned(),
+                    // Remember every entry so the next start can choose again.
+                    controller_urls: entries
+                        .iter()
+                        .map(|entry| entry.base().to_owned())
+                        .collect(),
                     user_id: reply.user_id.context("approval has no owner")?,
                     machine_id: reply.machine_id,
                     access_token: pending.access_token.clone(),
@@ -122,14 +163,14 @@ pub async fn pair(
     }
 }
 
-async fn load_pending(client: &Client, path: &Path) -> Result<Option<Pending>> {
+async fn load_pending(client: &Client, path: &Path, controller: &str) -> Result<Option<Pending>> {
     if !path.try_exists()? {
         return Ok(None);
     }
     let pending: Pending =
         serde_json::from_slice(&fs::read(path)?).context("Invalid pending pairing file")?;
     let response = client
-        .get(format!("{CONTROLLER}/worker/v1/pairings/{}", pending.id))
+        .get(format!("{controller}/worker/v1/pairings/{}", pending.id))
         .bearer_auth(&pending.device_secret)
         .send()
         .await?;
@@ -141,11 +182,16 @@ async fn load_pending(client: &Client, path: &Path) -> Result<Option<Pending>> {
     Ok(Some(pending))
 }
 
-async fn start_pairing(client: &Client, path: &Path, device: &DeviceInfo) -> Result<Pending> {
+async fn start_pairing(
+    client: &Client,
+    path: &Path,
+    device: &DeviceInfo,
+    controller: &str,
+) -> Result<Pending> {
     let device_secret = secret();
     let access_token = secret();
     let reply: StartReply = client
-        .post(format!("{CONTROLLER}/worker/v1/pairings"))
+        .post(format!("{controller}/worker/v1/pairings"))
         .json(&json!({
             "device_secret": device_secret,
             "token_hash": hex::encode(Sha256::digest(access_token.as_bytes())),

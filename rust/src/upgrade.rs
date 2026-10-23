@@ -2,7 +2,7 @@
 //! new build of itself, and no such mechanism exists outside MDM. The Worker
 //! answers every queued upgrade with a single `failed` report that explains
 //! the limitation, so the console records the outcome instead of waiting.
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use serde_json::json;
 use tokio::sync::watch;
@@ -26,6 +26,7 @@ pub fn reset() {
 pub fn spawn(
     client: reqwest::Client,
     config: WorkerConfig,
+    selector: Arc<crate::candidates::Selector>,
     boot_id: String,
     upgrade: protocol::Upgrade,
     _shutdown: watch::Receiver<bool>,
@@ -50,11 +51,11 @@ pub fn spawn(
         upgrade.version
     );
     tokio::spawn(async move {
-        let url = format!("{}/upgrade", protocol::worker_url(&config));
         let payload = json!({"id": upgrade.id, "status": "failed", "error": REASON});
-        if let Err(error) =
-            delivery::post_until_confirmed(&client, &config.access_token, &boot_id, &url, &payload)
-                .await
+        if let Err(error) = delivery::post_until_confirmed(
+            &client, &config, &selector, "/upgrade", &boot_id, &payload,
+        )
+        .await
         {
             log::warn!(
                 target: "cybion_worker",

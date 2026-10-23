@@ -19,10 +19,10 @@ pub struct Upgrade {
     pub boot_id: String,
 }
 
-pub fn worker_url(config: &WorkerConfig) -> String {
+pub fn worker_url(base: &str, config: &WorkerConfig) -> String {
     format!(
-        "{}/worker/v1/users/{}/workers/{}",
-        config.controller_url, config.user_id, config.machine_id
+        "{base}/worker/v1/users/{}/workers/{}",
+        config.user_id, config.machine_id
     )
 }
 
@@ -113,12 +113,13 @@ mod tests {
     fn builds_the_worker_protocol_path() {
         let config = WorkerConfig {
             controller_url: "https://cybion.ntnl.io".to_owned(),
+            controller_urls: Vec::new(),
             user_id: "auth-user".to_owned(),
             machine_id: "worker".to_owned(),
             access_token: "token".to_owned(),
         };
         assert_eq!(
-            worker_url(&config),
+            worker_url(&config.controller_url, &config),
             "https://cybion.ntnl.io/worker/v1/users/auth-user/workers/worker"
         );
     }
