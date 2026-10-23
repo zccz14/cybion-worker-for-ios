@@ -11,12 +11,18 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio::sync::watch;
 
+use crate::candidates;
 use crate::config;
 use crate::delivery::{self, DeliveryState};
 use crate::protocol;
 use crate::resources::ResourceSampler;
 use crate::state::{self, Phase, SharedState, Snapshot, now_secs};
 use crate::tools;
+
+// Switch entries after this many consecutive failed reconnects, and re-check
+// which entry is best this often while the task channel is healthy.
+const FAILURES_BEFORE_SWITCH: u32 = 3;
+const REPROBE_INTERVAL: Duration = Duration::from_secs(30 * 60);
 
 #[derive(Clone, Deserialize)]
 pub struct DeviceInfo {
@@ -81,7 +87,10 @@ pub fn start(config_dir: PathBuf, device: DeviceInfo) -> Result<()> {
     let state: SharedState = Arc::new(Mutex::new(Snapshot::starting(
         device.version.clone(),
         device.hostname.clone(),
-        crate::pairing::CONTROLLER.to_owned(),
+        candidates::default_candidates()
+            .ok()
+            .and_then(|entries| entries.first().map(|entry| entry.base().to_owned()))
+            .unwrap_or_default(),
     )));
     let (shutdown, receiver) = watch::channel(false);
     let thread_state = state.clone();
@@ -204,8 +213,20 @@ async fn run_worker(
             return Ok(());
         }
     };
+    let selector =
+        match candidates::resolve_candidates(&config.controller_url, &config.controller_urls)
+            .and_then(candidates::Selector::new)
+        {
+            Ok(selector) => selector,
+            Err(error) => {
+                fail_or_stop(&state, &shutdown, error);
+                return Ok(());
+            }
+        };
+    // Connect through whichever entry actually answers on this phone's network.
+    candidates::choose(&client, &selector).await;
     state::update(&state, |snapshot| {
-        snapshot.controller_url = config.controller_url.clone();
+        snapshot.controller_url = selector.current().base().to_owned();
         snapshot.machine_id = Some(config.machine_id.clone());
         snapshot.user_id = Some(config.user_id.clone());
     });
@@ -213,10 +234,22 @@ async fn run_worker(
     let heartbeat = tokio::spawn(heartbeat_loop(
         client.clone(),
         config.clone(),
+        selector.clone(),
         delivery.boot_id.clone(),
         device.clone(),
         shutdown.clone(),
     ));
+    // Phone networks change under a long-lived process; re-measure periodically.
+    let rebalance = tokio::spawn({
+        let client = client.clone();
+        let selector = selector.clone();
+        async move {
+            loop {
+                tokio::time::sleep(REPROBE_INTERVAL).await;
+                candidates::rebalance(&client, &selector).await;
+            }
+        }
+    });
     let mut attempt: u32 = 0;
     loop {
         if attempt == 0 {
@@ -226,6 +259,7 @@ async fn run_worker(
             result = event_session(
                 client.clone(),
                 config.clone(),
+                selector.clone(),
                 delivery.clone(),
                 state.clone(),
                 shutdown.clone(),
@@ -246,6 +280,14 @@ async fn run_worker(
                 }
                 attempt = attempt.saturating_add(1);
                 log::warn!(target: "cybion_worker", "event stream ended: {error}; reconnecting");
+                if attempt.is_multiple_of(FAILURES_BEFORE_SWITCH) && selector.len() > 1 {
+                    let next = selector.advance();
+                    log::warn!(
+                        target: "cybion_worker",
+                        "could not reconnect; failing over to controller entry {}",
+                        next.base()
+                    );
+                }
                 state::set_phase(
                     &state,
                     Phase::Reconnecting {
@@ -261,6 +303,7 @@ async fn run_worker(
         }
     }
     heartbeat.abort();
+    rebalance.abort();
     Ok(())
 }
 
@@ -309,13 +352,18 @@ fn fail_or_stop(state: &SharedState, shutdown: &watch::Receiver<bool>, error: an
 async fn event_session(
     client: Client,
     config: config::WorkerConfig,
+    selector: Arc<candidates::Selector>,
     delivery: Arc<DeliveryState>,
     state: SharedState,
     shutdown: watch::Receiver<bool>,
 ) -> Result<()> {
     let device = DEVICE.get().context("worker device info is missing")?;
+    // A session keeps the entry it was opened through; a switch closes it and
+    // the caller reconnects through the new entry.
+    let base = protocol::worker_url(selector.current().base(), &config);
+    let mut switch = selector.subscribe();
     let response = client
-        .get(format!("{}/events", protocol::worker_url(&config)))
+        .get(format!("{base}/events"))
         .header(delivery::BOOT_HEADER, &delivery.boot_id)
         .header("x-cybion-worker-version", device.version.as_str())
         .header(
@@ -336,10 +384,27 @@ async fn event_session(
     let mut stream = response.bytes_stream();
     let mut buffer: Vec<u8> = Vec::new();
     loop {
-        let chunk = match tokio::time::timeout(Duration::from_secs(45), stream.next()).await {
-            Err(_) => bail!("Worker event stream idle timeout"),
-            Ok(None) => return Ok(()),
-            Ok(Some(chunk)) => chunk?,
+        let chunk = tokio::select! {
+            // A switch must take effect without waiting for the next chunk.
+            switched = switch.changed() => {
+                if switched.is_err() {
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    continue;
+                }
+                log::info!(
+                    target: "cybion_worker",
+                    "controller entry switched; reopening the task channel via {}",
+                    selector.current().base()
+                );
+                return Ok(());
+            }
+            chunk = tokio::time::timeout(Duration::from_secs(45), stream.next()) => {
+                match chunk {
+                    Err(_) => bail!("Worker event stream idle timeout"),
+                    Ok(None) => return Ok(()),
+                    Ok(Some(chunk)) => chunk?,
+                }
+            }
         };
         buffer.extend_from_slice(&chunk);
         while let Some((separator, width)) = delivery::frame_end(&buffer) {
@@ -347,7 +412,13 @@ async fn event_session(
                 String::from_utf8(buffer[..separator].to_vec()).context("invalid event UTF-8")?;
             buffer.drain(..separator + width);
             if let Some(call) = protocol::parse_sse_call(&event)? {
-                spawn_call(client.clone(), config.clone(), delivery.clone(), call);
+                spawn_call(
+                    client.clone(),
+                    config.clone(),
+                    selector.clone(),
+                    delivery.clone(),
+                    call,
+                );
             } else if let Some(cancelled) = protocol::parse_sse_cancel(&event)? {
                 delivery.cancel(&cancelled);
             } else if let Some(upgrade) = protocol::parse_sse_upgrade(&event)? {
@@ -365,6 +436,7 @@ async fn event_session(
                     crate::upgrade::spawn(
                         client.clone(),
                         config.clone(),
+                        selector.clone(),
                         delivery.boot_id.clone(),
                         upgrade,
                         shutdown.clone(),
@@ -378,25 +450,33 @@ async fn event_session(
 fn spawn_call(
     client: Client,
     config: config::WorkerConfig,
+    selector: Arc<candidates::Selector>,
     delivery: Arc<DeliveryState>,
     call: protocol::ToolCall,
 ) {
-    let receipt_url = format!(
-        "{}/{}/{}/received",
-        protocol::worker_url(&config),
+    let receipt_path = format!(
+        "/{}/{}/received",
         protocol::call_category(&call.name),
         call.id
     );
     {
-        let (client, token, boot) = (
+        let (client, config, selector, boot) = (
             client.clone(),
-            config.access_token.clone(),
+            config.clone(),
+            selector.clone(),
             delivery.boot_id.clone(),
         );
         let call_id = call.id.clone();
         tokio::spawn(async move {
-            match delivery::post_until_confirmed(&client, &token, &boot, &receipt_url, &json!({}))
-                .await
+            match delivery::post_until_confirmed(
+                &client,
+                &config,
+                &selector,
+                &receipt_path,
+                &boot,
+                &json!({}),
+            )
+            .await
             {
                 Ok(()) => {
                     log::info!(target: "cybion_worker", "receipt submitted call_id={call_id}")
@@ -431,17 +511,17 @@ fn spawn_call(
             Ok(value) => (false, value),
             Err(error) => (true, json!({"error": error.to_string()})),
         };
-        let url = format!(
-            "{}/{}/{}/result",
-            protocol::worker_url(&config),
+        let path = format!(
+            "/{}/{}/result",
             protocol::call_category(&call.name),
             call.id
         );
         if let Err(error) = delivery::post_until_confirmed(
             &client,
-            &config.access_token,
+            &config,
+            &selector,
+            &path,
             &delivery.boot_id,
-            &url,
             &json!({"result": payload, "failed": failed}),
         )
         .await
@@ -455,6 +535,7 @@ fn spawn_call(
 async fn heartbeat_loop(
     client: Client,
     config: config::WorkerConfig,
+    selector: Arc<candidates::Selector>,
     boot_id: String,
     device: DeviceInfo,
     shutdown: watch::Receiver<bool>,
@@ -464,7 +545,8 @@ async fn heartbeat_loop(
         if *shutdown.borrow() {
             return;
         }
-        let base = protocol::worker_url(&config);
+        // Resolved every round, so liveness follows a switch within 10 seconds.
+        let base = protocol::worker_url(selector.current().base(), &config);
         let _ = post_json(
             &client,
             &config.access_token,

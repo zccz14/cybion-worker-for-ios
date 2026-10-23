@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::{Result, ensure};
@@ -105,16 +105,24 @@ pub fn retryable(error: &anyhow::Error) -> bool {
 
 pub async fn post_until_confirmed(
     client: &Client,
-    access_token: &str,
+    config: &crate::config::WorkerConfig,
+    selector: &Arc<crate::candidates::Selector>,
+    path: &str,
     boot_id: &str,
-    url: &str,
     payload: &Value,
 ) -> Result<()> {
     let mut failures = 0;
     loop {
+        // Resolved per attempt, so a retry follows an entry switch instead of
+        // pinning the message to the entry that just failed.
+        let url = format!(
+            "{}{}",
+            crate::protocol::worker_url(selector.current().base(), config),
+            path
+        );
         let response = client
-            .post(url)
-            .bearer_auth(access_token)
+            .post(&url)
+            .bearer_auth(&config.access_token)
             .header(BOOT_HEADER, boot_id)
             .timeout(Duration::from_secs(30))
             .json(payload)

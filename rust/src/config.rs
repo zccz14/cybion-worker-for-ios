@@ -8,6 +8,10 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Serialize, Deserialize)]
 pub struct WorkerConfig {
     pub controller_url: String,
+    /// Ordered entries this Worker may connect through. Absent from files
+    /// written by versions that only knew a single `controller_url`.
+    #[serde(default)]
+    pub controller_urls: Vec<String>,
     pub user_id: String,
     pub machine_id: String,
     pub access_token: String,
@@ -49,6 +53,8 @@ pub fn load(path: &Path) -> Result<WorkerConfig> {
         !config.access_token.trim().is_empty(),
         "access_token is required"
     );
+    // Every entry the Worker may use has to be valid, not just the primary.
+    crate::candidates::resolve_candidates(&controller_url, &config.controller_urls)?;
     Ok(WorkerConfig {
         controller_url,
         ..config
